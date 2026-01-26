@@ -1,0 +1,88 @@
+# Vimeo to Roku SDK Configuration
+# Copy this file to config.yaml and customize for your needs
+
+vimeo:
+  # Required: Your Vimeo API access token
+  # Get one at: https://developer.vimeo.com/apps
+  access_token: "your_vimeo_access_token"
+
+  # Optional: Vimeo user ID (leave empty to use authenticated user)
+  user_id: ""
+
+  # Optional: Sync only from a specific folder/project
+  # Find folder IDs in your Vimeo dashboard URL
+  folder_id: ""
+
+  # Optional: Sync only from a specific album/showcase
+  album_id: ""
+
+roku:
+  # Required: Your Roku channel provider name
+  # This appears in the Roku feed and channel
+  provider_name: "Your Channel Name"
+
+  # Optional: Roku channel ID (from Roku Developer Dashboard)
+  channel_id: ""
+
+  # Feed language (ISO 639-1 code)
+  language: "en"
+
+  # Where to save the generated feed JSON
+  feed_output_path: "./roku_feed.json"
+
+  # Default genre for videos without Vimeo categories
+  default_genre: "Entertainment"
+
+  # Content rating system and default rating
+  # Common systems: USA_TV, MPAA, UK_BBFC
+  # USA_TV ratings: TV-Y, TV-Y7, TV-G, TV-PG, TV-14, TV-MA
+  rating_system: "USA_TV"
+  default_rating: "TV-G"
+
+  # Optional: S3 bucket for hosting the feed
+  # Uncomment and configure for automatic S3 upload
+  # s3_bucket: "your-bucket-name"
+  # s3_key: "feeds/roku-feed.json"
+
+  # Optional: Webhook URL to notify when feed is updated
+  # webhook_url: "https://your-server.com/feed-updated"
+
+sync:
+  # Include private/unlisted videos
+  include_private: false
+
+  # Minimum video duration in seconds (0 = no minimum)
+  min_duration: 0
+
+  # Maximum video duration in seconds
+  # Uncomment to set a limit (e.g., exclude videos longer than 2 hours)
+  # max_duration: 7200
+
+  # Only include videos with these tags
+  # Leave empty to include all videos
+  include_tags: []
+  # Example:
+  # include_tags:
+  #   - "roku"
+  #   - "featured"
+
+  # Exclude videos with these tags
+  exclude_tags: []
+  # Example:
+  # exclude_tags:
+  #   - "draft"
+  #   - "private"
+
+  # Duration threshold for video type classification
+  # Videos shorter than this are "shortFormVideos"
+  # Videos longer are "movies"
+  short_form_max_duration: 900  # 15 minutes
+
+  # Enable caching for incremental syncs
+  # When enabled, tracks which videos have been synced
+  cache_enabled: true
+  cache_path: "./.vimeo_roku_cache"
+
+  # Logging configuration
+  log_level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  # log_file: "./vimeo_roku_sync.log"
