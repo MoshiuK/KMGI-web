@@ -124,7 +124,7 @@ Respond ONLY with valid JSON, no markdown or explanation.`;
     const prompt = `Generate 3 variations of ${section.type} section content for a ${settings.industry} business called "${settings.businessName}".
 Style: ${settings.stylePreset}
 
-Current content: ${JSON.stringify(section.blocks.filter((b) => b.type === 'text').map((b) => (b.props as TextProps).content))}
+Current content: ${JSON.stringify(section.blocks.filter((b: Block) => b.type === 'text').map((b: Block) => (b.props as TextProps).content))}
 
 Respond with JSON array of 3 variations, each with:
 { "headline": "...", "subtext": "..." }
@@ -145,7 +145,7 @@ Respond ONLY with valid JSON array.`;
         ...section,
         id: generateId(),
         variant: (i + 1) as 1 | 2 | 3,
-        blocks: section.blocks.map((block, bi) => {
+        blocks: section.blocks.map((block: Block) => {
           if (block.type === 'text') {
             const props = block.props as TextProps;
             if (props.variant === 'h1' || props.variant === 'h2') {

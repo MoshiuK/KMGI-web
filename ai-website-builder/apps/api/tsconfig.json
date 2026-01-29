@@ -10,6 +10,9 @@
     "sourceMap": true,
     "outDir": "./dist",
     "baseUrl": "./",
+    "paths": {
+      "@builder/shared": ["../../packages/shared/src/index"]
+    },
     "incremental": true,
     "skipLibCheck": true,
     "strictNullChecks": true,

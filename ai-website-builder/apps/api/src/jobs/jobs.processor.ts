@@ -17,7 +17,7 @@ interface JobData {
 
 @Injectable()
 export class JobsProcessor implements OnModuleInit {
-  private worker: Worker;
+  private worker!: Worker;
 
   constructor(
     private configService: ConfigService,
@@ -195,11 +195,6 @@ export class JobsProcessor implements OnModuleInit {
 
     const site = await this.prisma.site.findUnique({
       where: { id: siteId },
-      include: {
-        versions: {
-          where: { id: undefined }, // Will be overridden below
-        },
-      },
     });
 
     if (!site) {

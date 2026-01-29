@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import { SiteContent, Page, Section, Block, TextProps, ImageProps, ButtonProps, ListProps } from '@builder/shared';
+import { SiteContent, Page, Section, Block, TextProps, ImageProps, ButtonProps, ListProps, ListItem } from '@builder/shared';
 
 const execAsync = promisify(exec);
 
@@ -142,7 +142,7 @@ export class WordPressService {
       }
 
       // Set home page
-      const homePage = content.pages.find((p) => p.slug === 'home');
+      const homePage = content.pages.find((p: Page) => p.slug === 'home');
       if (homePage) {
         const homePageId = await this.runWpCli(
           `post list --post_type=page --name="home" --format=ids ${urlFlag}`,
@@ -158,7 +158,7 @@ export class WordPressService {
       // In dev mode, just log
       if (this.configService.get('NODE_ENV') === 'development') {
         console.log('DEV MODE: Simulating publish to WordPress');
-        console.log('Pages to publish:', content.pages.map((p) => p.title));
+        console.log('Pages to publish:', content.pages.map((p: Page) => p.title));
         return;
       }
       throw error;
@@ -170,20 +170,20 @@ export class WordPressService {
   }
 
   private compilePageToHtml(page: Page, accentColor: string): string {
-    return page.sections.map((section) => this.compileSectionToHtml(section, accentColor)).join('\n');
+    return page.sections.map((section: Section) => this.compileSectionToHtml(section, accentColor)).join('\n');
   }
 
   private compilePageToGutenberg(page: Page, accentColor: string): string {
-    return page.sections.map((section) => this.compileSectionToGutenberg(section, accentColor)).join('\n\n');
+    return page.sections.map((section: Section) => this.compileSectionToGutenberg(section, accentColor)).join('\n\n');
   }
 
   private compileSectionToHtml(section: Section, accentColor: string): string {
-    const blocks = section.blocks.map((block) => this.compileBlockToHtml(block, accentColor)).join('\n');
+    const blocks = section.blocks.map((block: Block) => this.compileBlockToHtml(block, accentColor)).join('\n');
     return `<section class="wp-block-group section-${section.type}" data-section-id="${section.id}">${blocks}</section>`;
   }
 
   private compileSectionToGutenberg(section: Section, accentColor: string): string {
-    const blocks = section.blocks.map((block) => this.compileBlockToGutenberg(block, accentColor)).join('\n');
+    const blocks = section.blocks.map((block: Block) => this.compileBlockToGutenberg(block, accentColor)).join('\n');
     return `<!-- wp:group {"className":"section-${section.type}"} -->\n<div class="wp-block-group section-${section.type}">${blocks}</div>\n<!-- /wp:group -->`;
   }
 
@@ -207,7 +207,7 @@ export class WordPressService {
       case 'list': {
         const props = block.props as ListProps;
         const items = props.items
-          .map((item) => `<li><strong>${this.escapeHtml(item.title)}</strong><p>${this.escapeHtml(item.description)}</p></li>`)
+          .map((item: ListItem) => `<li><strong>${this.escapeHtml(item.title)}</strong><p>${this.escapeHtml(item.description)}</p></li>`)
           .join('');
         return `<ul class="wp-block-list layout-${props.layout}">${items}</ul>`;
       }
@@ -244,7 +244,7 @@ export class WordPressService {
       }
       case 'list': {
         const props = block.props as ListProps;
-        const items = props.items.map((item) => `<li><strong>${this.escapeHtml(item.title)}</strong> - ${this.escapeHtml(item.description)}</li>`).join('');
+        const items = props.items.map((item: ListItem) => `<li><strong>${this.escapeHtml(item.title)}</strong> - ${this.escapeHtml(item.description)}</li>`).join('');
         return `<!-- wp:list -->\n<ul class="wp-block-list">${items}</ul>\n<!-- /wp:list -->`;
       }
       default:
