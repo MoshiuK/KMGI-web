@@ -1035,3 +1035,804 @@ FILEEOF
 
 echo "API config files written."
 
+
+# ============================================
+# API - PRISMA
+# ============================================
+
+cat > apps/api/prisma/schema.prisma << 'FILEEOF'
+// Prisma schema for AI Website Builder MVP
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// TENANTS & USERS
+// ============================================
+
+model Tenant {
+  id           String   @id @default(cuid())
+  name         String
+  slug         String   @unique
+  logoUrl      String?  @map("logo_url")
+  primaryColor String   @default("#2563EB") @map("primary_color")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  memberships Membership[]
+  sites       Site[]
+
+  @@map("tenants")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  memberships   Membership[]
+  sites         Site[]
+  subscriptions StripeSubscription[]
+
+  @@map("users")
+}
+
+enum MembershipRole {
+  owner
+  admin
+  member
+}
+
+model Membership {
+  id        String         @id @default(cuid())
+  userId    String         @map("user_id")
+  tenantId  String         @map("tenant_id")
+  role      MembershipRole @default(member)
+  createdAt DateTime       @default(now()) @map("created_at")
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, tenantId])
+  @@map("memberships")
+}
+
+// ============================================
+// SITES & VERSIONS
+// ============================================
+
+enum SiteStatus {
+  provisioning
+  generating
+  draft
+  published
+  error
+}
+
+model Site {
+  id                 String     @id @default(cuid())
+  tenantId           String     @map("tenant_id")
+  ownerUserId        String     @map("owner_user_id")
+  name               String
+  status             SiteStatus @default(provisioning)
+  wpSiteId           Int?       @map("wp_site_id")
+  wpAdminUrl         String?    @map("wp_admin_url")
+  wpSiteUrl          String?    @map("wp_site_url")
+  currentVersionId   String?    @map("current_version_id")
+  publishedVersionId String?    @map("published_version_id")
+  createdAt          DateTime   @default(now()) @map("created_at")
+  updatedAt          DateTime   @updatedAt @map("updated_at")
+
+  tenant   Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  owner    User          @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+  versions SiteVersion[]
+  jobs     Job[]
+
+  @@map("sites")
+}
+
+model SiteVersion {
+  id            String   @id @default(cuid())
+  siteId        String   @map("site_id")
+  versionNumber Int      @map("version_number")
+  pageJson      Json     @map("page_json")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  site Site @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@unique([siteId, versionNumber])
+  @@map("site_versions")
+}
+
+// ============================================
+// JOBS & LOGS
+// ============================================
+
+enum JobType {
+  provision
+  generate
+  publish
+  rollback
+}
+
+enum JobStatus {
+  pending
+  running
+  completed
+  failed
+}
+
+model Job {
+  id          String    @id @default(cuid())
+  siteId      String    @map("site_id")
+  type        JobType
+  status      JobStatus @default(pending)
+  error       String?
+  metadata    Json?
+  createdAt   DateTime  @default(now()) @map("created_at")
+  completedAt DateTime? @map("completed_at")
+
+  site Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  logs JobLog[]
+
+  @@map("jobs")
+}
+
+model JobLog {
+  id        String   @id @default(cuid())
+  jobId     String   @map("job_id")
+  message   String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@map("job_logs")
+}
+
+// ============================================
+// STRIPE BILLING
+// ============================================
+
+enum SubscriptionStatus {
+  active
+  canceled
+  past_due
+  trialing
+  incomplete
+}
+
+model StripeSubscription {
+  id                   String             @id @default(cuid())
+  userId               String             @map("user_id")
+  stripeCustomerId     String             @map("stripe_customer_id")
+  stripeSubscriptionId String             @unique @map("stripe_subscription_id")
+  status               SubscriptionStatus @default(incomplete)
+  currentPeriodEnd     DateTime           @map("current_period_end")
+  createdAt            DateTime           @default(now()) @map("created_at")
+  updatedAt            DateTime           @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("stripe_subscriptions")
+}
+FILEEOF
+
+cat > apps/api/prisma/seed.ts << 'FILEEOF'
+import { PrismaClient, MembershipRole } from '@prisma/client';
+import * as bcrypt from 'bcrypt';
+
+const prisma = new PrismaClient();
+
+async function main() {
+  console.log('Seeding database...');
+
+  // Create default demo tenant
+  const demoTenant = await prisma.tenant.upsert({
+    where: { slug: 'demo' },
+    update: {},
+    create: {
+      name: 'Demo Builder',
+      slug: 'demo',
+      logoUrl: null,
+      primaryColor: '#2563EB',
+    },
+  });
+  console.log('Created demo tenant:', demoTenant.id);
+
+  // Create demo user
+  const passwordHash = await bcrypt.hash('demo1234', 10);
+  const demoUser = await prisma.user.upsert({
+    where: { email: 'demo@example.com' },
+    update: {},
+    create: {
+      email: 'demo@example.com',
+      passwordHash,
+    },
+  });
+  console.log('Created demo user:', demoUser.id);
+
+  // Create membership
+  await prisma.membership.upsert({
+    where: {
+      userId_tenantId: {
+        userId: demoUser.id,
+        tenantId: demoTenant.id,
+      },
+    },
+    update: {},
+    create: {
+      userId: demoUser.id,
+      tenantId: demoTenant.id,
+      role: MembershipRole.owner,
+    },
+  });
+  console.log('Created membership');
+
+  // Create a second tenant for white-label demo
+  const acmeTenant = await prisma.tenant.upsert({
+    where: { slug: 'acme' },
+    update: {},
+    create: {
+      name: 'ACME Web Builder',
+      slug: 'acme',
+      logoUrl: null,
+      primaryColor: '#DC2626',
+    },
+  });
+  console.log('Created ACME tenant:', acmeTenant.id);
+
+  console.log('Seeding complete!');
+  console.log('');
+  console.log('Demo credentials:');
+  console.log('  Email: demo@example.com');
+  console.log('  Password: demo1234');
+  console.log('  Tenant: demo (or acme for different branding)');
+}
+
+main()
+  .catch((e) => {
+    console.error(e);
+    process.exit(1);
+  })
+  .finally(async () => {
+    await prisma.$disconnect();
+  });
+FILEEOF
+
+echo "API Prisma files written."
+
+
+# ============================================
+# API - SRC FILES (main, app.module, prisma)
+# ============================================
+
+cat > apps/api/src/main.ts << 'FILEEOF'
+import { NestFactory } from '@nestjs/core';
+import { ValidationPipe } from '@nestjs/common';
+import { AppModule } from './app.module';
+
+async function bootstrap() {
+  const app = await NestFactory.create(AppModule, {
+    rawBody: true, // Required for Stripe webhooks
+  });
+
+  // Enable CORS for frontend
+  app.enableCors({
+    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+    credentials: true,
+  });
+
+  // Global validation pipe
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      transform: true,
+      forbidNonWhitelisted: true,
+    }),
+  );
+
+  // Global prefix
+  app.setGlobalPrefix('api');
+
+  const port = process.env.PORT || 4000;
+  await app.listen(port);
+  console.log(`API running on http://localhost:${port}`);
+}
+bootstrap();
+FILEEOF
+
+cat > apps/api/src/app.module.ts << 'FILEEOF'
+import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
+import { PrismaModule } from './prisma/prisma.module';
+import { AuthModule } from './auth/auth.module';
+import { SitesModule } from './sites/sites.module';
+import { BillingModule } from './billing/billing.module';
+import { JobsModule } from './jobs/jobs.module';
+import { TenantsModule } from './tenants/tenants.module';
+import { WordPressModule } from './wordpress/wordpress.module';
+import { AiModule } from './ai/ai.module';
+
+@Module({
+  imports: [
+    ConfigModule.forRoot({
+      isGlobal: true,
+      envFilePath: '.env',
+    }),
+    PrismaModule,
+    AuthModule,
+    TenantsModule,
+    SitesModule,
+    BillingModule,
+    JobsModule,
+    WordPressModule,
+    AiModule,
+  ],
+})
+export class AppModule {}
+FILEEOF
+
+cat > apps/api/src/prisma/prisma.module.ts << 'FILEEOF'
+import { Global, Module } from '@nestjs/common';
+import { PrismaService } from './prisma.service';
+
+@Global()
+@Module({
+  providers: [PrismaService],
+  exports: [PrismaService],
+})
+export class PrismaModule {}
+FILEEOF
+
+cat > apps/api/src/prisma/prisma.service.ts << 'FILEEOF'
+import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { PrismaClient } from '@prisma/client';
+
+@Injectable()
+export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
+  async onModuleInit() {
+    await this.$connect();
+  }
+
+  async onModuleDestroy() {
+    await this.$disconnect();
+  }
+}
+FILEEOF
+
+echo "API main/prisma files written."
+
+
+# ============================================
+# API - AUTH MODULE
+# ============================================
+
+cat > apps/api/src/auth/auth.types.ts << 'FILEEOF'
+import { Request } from 'express';
+
+export interface AuthUser {
+  userId: string;
+  email: string;
+  tenantId: string;
+}
+
+export interface AuthRequest extends Request {
+  user: AuthUser;
+}
+FILEEOF
+
+cat > apps/api/src/auth/auth.dto.ts << 'FILEEOF'
+import { IsEmail, IsString, MinLength, IsOptional } from 'class-validator';
+
+export class SignupDto {
+  @IsEmail()
+  email: string;
+
+  @IsString()
+  @MinLength(8)
+  password: string;
+
+  @IsString()
+  @IsOptional()
+  tenantSlug?: string;
+}
+
+export class LoginDto {
+  @IsEmail()
+  email: string;
+
+  @IsString()
+  password: string;
+
+  @IsString()
+  @IsOptional()
+  tenantSlug?: string;
+}
+FILEEOF
+
+cat > apps/api/src/auth/jwt-auth.guard.ts << 'FILEEOF'
+import { Injectable } from '@nestjs/common';
+import { AuthGuard } from '@nestjs/passport';
+
+@Injectable()
+export class JwtAuthGuard extends AuthGuard('jwt') {}
+FILEEOF
+
+cat > apps/api/src/auth/jwt.strategy.ts << 'FILEEOF'
+import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { PassportStrategy } from '@nestjs/passport';
+import { ExtractJwt, Strategy } from 'passport-jwt';
+import { ConfigService } from '@nestjs/config';
+import { PrismaService } from '../prisma/prisma.service';
+
+export interface JwtPayload {
+  sub: string;
+  email: string;
+  tenantId: string;
+}
+
+@Injectable()
+export class JwtStrategy extends PassportStrategy(Strategy) {
+  constructor(
+    configService: ConfigService,
+    private prisma: PrismaService,
+  ) {
+    super({
+      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+      ignoreExpiration: false,
+      secretOrKey: configService.get<string>('JWT_SECRET') || 'dev-secret-change-in-production',
+    });
+  }
+
+  async validate(payload: JwtPayload) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: payload.sub },
+    });
+
+    if (!user) {
+      throw new UnauthorizedException('User not found');
+    }
+
+    return {
+      userId: payload.sub,
+      email: payload.email,
+      tenantId: payload.tenantId,
+    };
+  }
+}
+FILEEOF
+
+cat > apps/api/src/auth/auth.module.ts << 'FILEEOF'
+import { Module } from '@nestjs/common';
+import { JwtModule } from '@nestjs/jwt';
+import { PassportModule } from '@nestjs/passport';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { AuthService } from './auth.service';
+import { AuthController } from './auth.controller';
+import { JwtStrategy } from './jwt.strategy';
+
+@Module({
+  imports: [
+    PassportModule.register({ defaultStrategy: 'jwt' }),
+    JwtModule.registerAsync({
+      imports: [ConfigModule],
+      useFactory: async (configService: ConfigService) => ({
+        secret: configService.get<string>('JWT_SECRET') || 'dev-secret-change-in-production',
+        signOptions: { expiresIn: '7d' },
+      }),
+      inject: [ConfigService],
+    }),
+  ],
+  controllers: [AuthController],
+  providers: [AuthService, JwtStrategy],
+  exports: [AuthService, JwtModule],
+})
+export class AuthModule {}
+FILEEOF
+
+echo "API auth module files written."
+
+
+cat > apps/api/src/auth/auth.service.ts << 'FILEEOF'
+import { Injectable, UnauthorizedException, ConflictException, NotFoundException } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
+import * as bcrypt from 'bcrypt';
+import { PrismaService } from '../prisma/prisma.service';
+import { SignupDto, LoginDto } from './auth.dto';
+
+@Injectable()
+export class AuthService {
+  constructor(
+    private prisma: PrismaService,
+    private jwtService: JwtService,
+  ) {}
+
+  async signup(dto: SignupDto) {
+    // Check if user exists
+    const existingUser = await this.prisma.user.findUnique({
+      where: { email: dto.email },
+    });
+
+    if (existingUser) {
+      throw new ConflictException('Email already registered');
+    }
+
+    // Get tenant (use default if not specified)
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { slug: dto.tenantSlug || 'demo' },
+    });
+
+    if (!tenant) {
+      throw new NotFoundException('Tenant not found');
+    }
+
+    // Hash password
+    const passwordHash = await bcrypt.hash(dto.password, 10);
+
+    // Create user and membership in transaction
+    const user = await this.prisma.$transaction(async (tx) => {
+      const newUser = await tx.user.create({
+        data: {
+          email: dto.email,
+          passwordHash,
+        },
+      });
+
+      await tx.membership.create({
+        data: {
+          userId: newUser.id,
+          tenantId: tenant.id,
+          role: 'member',
+        },
+      });
+
+      return newUser;
+    });
+
+    // Generate token
+    const token = this.jwtService.sign({
+      sub: user.id,
+      email: user.email,
+      tenantId: tenant.id,
+    });
+
+    return {
+      token,
+      user: {
+        id: user.id,
+        email: user.email,
+        createdAt: user.createdAt,
+      },
+      tenant: {
+        id: tenant.id,
+        name: tenant.name,
+        logoUrl: tenant.logoUrl,
+        primaryColor: tenant.primaryColor,
+        createdAt: tenant.createdAt,
+      },
+    };
+  }
+
+  async login(dto: LoginDto) {
+    // Find user
+    const user = await this.prisma.user.findUnique({
+      where: { email: dto.email },
+    });
+
+    if (!user) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    // Verify password
+    const isValid = await bcrypt.compare(dto.password, user.passwordHash);
+    if (!isValid) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    // Get tenant (use default if not specified)
+    const tenantSlug = dto.tenantSlug || 'demo';
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { slug: tenantSlug },
+    });
+
+    if (!tenant) {
+      throw new NotFoundException('Tenant not found');
+    }
+
+    // Check membership
+    const membership = await this.prisma.membership.findUnique({
+      where: {
+        userId_tenantId: {
+          userId: user.id,
+          tenantId: tenant.id,
+        },
+      },
+    });
+
+    if (!membership) {
+      // Auto-create membership for demo purposes
+      await this.prisma.membership.create({
+        data: {
+          userId: user.id,
+          tenantId: tenant.id,
+          role: 'member',
+        },
+      });
+    }
+
+    // Generate token
+    const token = this.jwtService.sign({
+      sub: user.id,
+      email: user.email,
+      tenantId: tenant.id,
+    });
+
+    return {
+      token,
+      user: {
+        id: user.id,
+        email: user.email,
+        createdAt: user.createdAt,
+      },
+      tenant: {
+        id: tenant.id,
+        name: tenant.name,
+        logoUrl: tenant.logoUrl,
+        primaryColor: tenant.primaryColor,
+        createdAt: tenant.createdAt,
+      },
+    };
+  }
+
+  async getMe(userId: string, tenantId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+    });
+
+    if (!tenant) {
+      throw new NotFoundException('Tenant not found');
+    }
+
+    const membership = await this.prisma.membership.findUnique({
+      where: {
+        userId_tenantId: {
+          userId: user.id,
+          tenantId: tenant.id,
+        },
+      },
+    });
+
+    if (!membership) {
+      throw new NotFoundException('Membership not found');
+    }
+
+    // Get subscription
+    const subscription = await this.prisma.stripeSubscription.findFirst({
+      where: { userId: user.id },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return {
+      user: {
+        id: user.id,
+        email: user.email,
+        createdAt: user.createdAt,
+      },
+      tenant: {
+        id: tenant.id,
+        name: tenant.name,
+        logoUrl: tenant.logoUrl,
+        primaryColor: tenant.primaryColor,
+        createdAt: tenant.createdAt,
+      },
+      membership: {
+        userId: membership.userId,
+        tenantId: membership.tenantId,
+        role: membership.role,
+      },
+      subscription: subscription
+        ? {
+            status: subscription.status,
+            currentPeriodEnd: subscription.currentPeriodEnd,
+          }
+        : null,
+    };
+  }
+}
+FILEEOF
+
+cat > apps/api/src/auth/auth.controller.ts << 'FILEEOF'
+import { Controller, Post, Get, Body, UseGuards, Req } from '@nestjs/common';
+import { AuthService } from './auth.service';
+import { SignupDto, LoginDto } from './auth.dto';
+import { JwtAuthGuard } from './jwt-auth.guard';
+import { AuthRequest } from './auth.types';
+
+@Controller('auth')
+export class AuthController {
+  constructor(private authService: AuthService) {}
+
+  /**
+   * POST /api/auth/signup
+   *
+   * Request:
+   * {
+   *   "email": "user@example.com",
+   *   "password": "securePassword123",
+   *   "tenantSlug": "demo" // optional, defaults to "demo"
+   * }
+   *
+   * Response:
+   * {
+   *   "token": "eyJhbGciOiJIUzI1NiIs...",
+   *   "user": { "id": "...", "email": "user@example.com", "createdAt": "..." },
+   *   "tenant": { "id": "...", "name": "Demo Builder", "primaryColor": "#2563EB", ... }
+   * }
+   */
+  @Post('signup')
+  async signup(@Body() dto: SignupDto) {
+    return this.authService.signup(dto);
+  }
+
+  /**
+   * POST /api/auth/login
+   *
+   * Request:
+   * {
+   *   "email": "user@example.com",
+   *   "password": "securePassword123",
+   *   "tenantSlug": "demo" // optional
+   * }
+   *
+   * Response:
+   * {
+   *   "token": "eyJhbGciOiJIUzI1NiIs...",
+   *   "user": { ... },
+   *   "tenant": { ... }
+   * }
+   */
+  @Post('login')
+  async login(@Body() dto: LoginDto) {
+    return this.authService.login(dto);
+  }
+
+  /**
+   * GET /api/auth/me
+   *
+   * Headers:
+   * Authorization: Bearer <token>
+   *
+   * Response:
+   * {
+   *   "user": { "id": "...", "email": "...", "createdAt": "..." },
+   *   "tenant": { "id": "...", "name": "...", "primaryColor": "...", ... },
+   *   "membership": { "role": "member" },
+   *   "subscription": { "status": "active", "currentPeriodEnd": "..." } | null
+   * }
+   */
+  @Get('me')
+  @UseGuards(JwtAuthGuard)
+  async getMe(@Req() req: AuthRequest) {
+    return this.authService.getMe(req.user.userId, req.user.tenantId);
+  }
+}
+FILEEOF
+
+echo "API auth service/controller written."
+
