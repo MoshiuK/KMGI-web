@@ -11,7 +11,8 @@
     "outDir": "./dist",
     "baseUrl": "./",
     "paths": {
-      "@builder/shared": ["../../packages/shared/src/index"]
+      "@builder/shared": ["../../packages/shared/src/index"],
+      "@builder/shared/*": ["../../packages/shared/src/*"]
     },
     "incremental": true,
     "skipLibCheck": true,
